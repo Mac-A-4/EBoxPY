@@ -520,6 +520,8 @@ static PyObject* EBoxPY_Bytes_repr(PyObject* self);
 
 static PyObject* EBoxPY_Bytes_Get(PEBoxPY_Bytes self, PyObject* args);
 static PyObject* EBoxPY_Bytes_Set(PEBoxPY_Bytes self, PyObject* args);
+static PyObject* EBoxPY_Bytes_CopyTo(PEBoxPY_Bytes self, PyObject* args);
+static PyObject* EBoxPY_Bytes_CopyFrom(PEBoxPY_Bytes self, PyObject* args);
 
 static PyMemberDef EBoxPY_Bytes_Members[] = {
 	{"Allocation_", T_ULONGLONG, offsetof(EBoxPY_Bytes, Allocation_), READONLY, PyDoc_STR("The Allocation of Bytes.")},
@@ -530,6 +532,8 @@ static PyMemberDef EBoxPY_Bytes_Members[] = {
 static PyMethodDef EBoxPY_Bytes_Methods[] = {
 	{"Get", (PyCFunction)EBoxPY_Bytes_Get, METH_VARARGS, PyDoc_STR("EBoxPY.Bytes.Get(_Offset, _Type)\nGets a Native data type from the Bytes at the specified Offset.")},
 	{"Set", (PyCFunction)EBoxPY_Bytes_Set, METH_VARARGS, PyDoc_STR("EBoxPY.Bytes.Set(_Offset, _Type, _Value)\nSets a Native data type from the Bytes at the specified Offset.")},
+	{"CopyTo", (PyCFunction)EBoxPY_Bytes_CopyTo, METH_VARARGS, PyDoc_STR("EBoxPY.Bytes.CopyTo(_Destination, _SourceIndex, _DestinationIndex, _Size)\nCopies a portion of the Bytes into the Destination.")},
+	{"CopyFrom", (PyCFunction)EBoxPY_Bytes_CopyFrom, METH_VARARGS, PyDoc_STR("EBoxPY.Bytes.CopyFrom(_Source, _SourceIndex, _DestinationIndex, _Size)\nCopies a portion of the Bytes from the Source.")},
 	{NULL}
 };
 
