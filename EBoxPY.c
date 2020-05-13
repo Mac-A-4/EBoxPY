@@ -721,6 +721,81 @@ static PyObject* EBoxPY_Bytes_Set(PEBoxPY_Bytes self, PyObject* args) {
 	}
 }
 
+static int _EBoxPY_Bytes_Copy(PEBoxPY_Bytes _Source, PEBoxPY_Bytes _Destination, unsigned long long _SourceIndex, unsigned long long _DestinationIndex, unsigned long long _Size) {
+	if (_SourceIndex + _Size > _Source->Size_)
+		return 0;
+	if (_DestinationIndex + _Size > _Destination->Size_)
+		return 0;
+	memcpy(_Destination->Allocation_ + _DestinationIndex, _Source->Allocation_ + _SourceIndex, _Size);
+	return 1;
+}
+
+static PyObject* EBoxPY_Bytes_CopyTo(PEBoxPY_Bytes self, PyObject* args) {
+	if (PyTuple_Size(args) != 4) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyTo Requires 4 Arguments.");
+		return NULL;
+	}
+	PyObject* destination = PyTuple_GetItem(args, 0);
+	if (!PyObject_IsInstance(destination, (PyObject*)&EBoxPY_Bytes_Type)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyTo Requires EBoxPY.Bytes as _Destination.");
+		return NULL;
+	}
+	if (!PyLong_Check(PyTuple_GetItem(args, 1))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyTo Requires int as _SourceIndex.");
+		return NULL;
+	}
+	unsigned long long source_index = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 1));
+	if (!PyLong_Check(PyTuple_GetItem(args, 2))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyTo Requires int as _DestinationIndex.");
+		return NULL;
+	}
+	unsigned long long destination_index = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 2));
+	if (!PyLong_Check(PyTuple_GetItem(args, 3))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyTo Requires int as _Size.");
+		return NULL;
+	}
+	unsigned long long size = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 3));
+	if (!_EBoxPY_Bytes_Copy(self, (PEBoxPY_Bytes)destination, source_index, destination_index, size)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Bytes.CopyTo Failed to Copy Bytes.");
+		return NULL;
+	}
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+static PyObject* EBoxPY_Bytes_CopyFrom(PEBoxPY_Bytes self, PyObject* args) {
+	if (PyTuple_Size(args) != 4) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyFrom Requires 4 Arguments.");
+		return NULL;
+	}
+	PyObject* source = PyTuple_GetItem(args, 0);
+	if (!PyObject_IsInstance(source, (PyObject*)&EBoxPY_Bytes_Type)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyFrom Requires EBoxPY.Bytes as _Source.");
+		return NULL;
+	}
+	if (!PyLong_Check(PyTuple_GetItem(args, 1))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyFrom Requires int as _SourceIndex.");
+		return NULL;
+	}
+	unsigned long long source_index = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 1));
+	if (!PyLong_Check(PyTuple_GetItem(args, 2))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyFrom Requires int as _DestinationIndex.");
+		return NULL;
+	}
+	unsigned long long destination_index = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 2));
+	if (!PyLong_Check(PyTuple_GetItem(args, 3))) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Bytes.CopyFrom Requires int as _Size.");
+		return NULL;
+	}
+	unsigned long long size = PyLong_AsUnsignedLongLong(PyTuple_GetItem(args, 3));
+	if (!_EBoxPY_Bytes_Copy((PEBoxPY_Bytes)source, self, source_index, destination_index, size)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Bytes.CopyFrom Failed to Copy Bytes.");
+		return NULL;
+	}
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
 /*
  *
  * EBoxPY.Process
