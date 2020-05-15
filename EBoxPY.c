@@ -882,10 +882,12 @@ static PyObject* _EBoxPY_Create_Thread_ID(unsigned long _ID) {
 	return output;
 }
 
-static PyObject* _EBoxPY_Create_Thread_Handle(HANDLE _Handle) { // IMPORTANT: call CloseHandle() if returns NULL!! This steals a reference...
+static PyObject* _EBoxPY_Create_Thread_Handle(HANDLE _Handle) {
 	PyObject* output = EBoxPY_Thread_Type.tp_alloc(&EBoxPY_Thread_Type, 1);
-	if (!output)
+	if (!output) {
+		CloseHandle(_Handle);
 		return NULL;
+	}
 	EBOXPY_OBJECT_ZERO(EBoxPY_Thread, output);
 	PEBoxPY_Thread thread = (PEBoxPY_Thread)output;
 	thread->ID_ = GetThreadId(_Handle);
@@ -1306,10 +1308,22 @@ static PyObject* EBoxPY_StartProcess(PyObject* self, PyObject* args) {
 		return NULL;
 	}
 	PyMem_Free(executable);
+	PyObject* thread = _EBoxPY_Create_Thread_Handle(information.hThread);
+	if (!thread){
+		CloseHandle(information.hProcess);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Create Thread.");
+		return NULL;
+	}
+	if (!EBoxPY_Thread_Lock((PEBoxPY_Thread)thread)) {
+		CloseHandle(information.hProcess);
+		Py_DECREF(thread);
+		return NULL;
+	}
+	ResumeThread(information.hThread); // Because EBoxPY_Thread_Lock suspends!
 	PyObject* output = EBoxPY_Process_Type.tp_alloc(&EBoxPY_Process_Type, 1);
 	if (!output) {
 		CloseHandle(information.hProcess);
-		CloseHandle(information.hThread);
+		Py_DECREF(thread);
 		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Allocate EBoxPY.Process.");
 		return NULL;
 	}
@@ -1320,13 +1334,12 @@ static PyObject* EBoxPY_StartProcess(PyObject* self, PyObject* args) {
 	process->Process_ = information.hProcess;
 	process->Name_ = _EBoxPY_GetProcessNameFromID(process->ID_);
 	if (!process->Name_) {
-		CloseHandle(information.hProcess);
-		CloseHandle(information.hThread);
+		Py_DECREF(thread);
 		Py_DECREF(output);
 		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Get Process Name from ID.");
 		return NULL;
 	}
-	return output;
+	return PyTuple_Pack(2, output, thread);
 }
 
 static void EBoxPY_Process_dealloc(PyObject* self) {
