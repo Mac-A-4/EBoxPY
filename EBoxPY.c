@@ -1656,12 +1656,12 @@ static PyObject* EBoxPY_Process_Allocate(PEBoxPY_Process self, PyObject* args) {
 		SYSTEM_INFO information;
 		GetSystemInfo(&information);
 		long long start = _address - _range;
-		start &= information.dwAllocationGranularity;
+		start &= ~((unsigned long long)(information.dwAllocationGranularity - 1));
 		if (start < (_address - _range))
 			start += information.dwAllocationGranularity;
 		long long end = _address + _range - _size;
-		end &= information.dwAllocationGranularity;
-		if (end > (_address + _range - _size))
+		end &= ~((unsigned long long)(information.dwAllocationGranularity - 1));
+		if (end > (_address + _range - (long long)_size))
 			end -= information.dwAllocationGranularity;
 		for (long long i = start; i < end; i += 0x1000) {
 			unsigned long long __address = (unsigned long long)VirtualAllocEx(self->Process_, (void*)i, _size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
