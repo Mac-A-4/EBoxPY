@@ -1204,6 +1204,8 @@ static PyObject* EBoxPY_Process_GetRegion(PEBoxPY_Process self, PyObject* addres
 static PyObject* EBoxPY_Process_ReadTo(PEBoxPY_Process self, PyObject* args);
 static PyObject* EBoxPY_Process_WriteFrom(PEBoxPY_Process self, PyObject* args);
 static PyObject* EBoxPY_Process_GetThreads(PEBoxPY_Process self);
+static PyObject* EBoxPY_Process_Allocate(PEBoxPY_Process self, PyObject* args);
+static PyObject* EBoxPY_Process_Free(PEBoxPY_Process self, PyObject* allocation);
 
 static PyMemberDef EBoxPY_Process_Members[] = {
 	{"Process_", T_ULONGLONG, offsetof(EBoxPY_Process, Process_), READONLY, PyDoc_STR("The Handle to the Process.")},
@@ -1221,6 +1223,8 @@ static PyMethodDef EBoxPY_Process_Methods[] = {
 	{"ReadTo", (PyCFunction)EBoxPY_Process_ReadTo, METH_VARARGS, PyDoc_STR("EBoxPY.Process.ReadTo(_Address, _Bytes, _Start, _Size)\nReads Bytes from Address into specified Bytes object.")},
 	{"WriteFrom", (PyCFunction)EBoxPY_Process_WriteFrom, METH_VARARGS, PyDoc_STR("EBoxPY.Process.WriteFrom(_Address, _Bytes, _Start, _Size)\nWrites Bytes to specified Address.")},
 	{"GetThreads", (PyCFunction)EBoxPY_Process_GetThreads, METH_NOARGS, PyDoc_STR("EBoxPY.Process.GetThreads() -> [ EBoxPY.Thread(...), ... ]\nRetrieves a list of Threads running in the Process.")},
+	{"Allocate", (PyCFunction)EBoxPY_Process_Allocate, METH_VARARGS, PyDoc_STR("EBoxPY.Process.Allocate(_Size, _Address=None, _Range=None) -> int\nAllocates Memory in the Process with a given Size + Location options.")},
+	{"Free", (PyCFunction)EBoxPY_Process_Free, METH_O, PyDoc_STR("EBoxPY.Process.Free(_Allocation)\nFrees Memory in a Process.")},
 	{NULL}
 };
 
@@ -1604,6 +1608,85 @@ static PyObject* EBoxPY_Process_GetThreads(PEBoxPY_Process self) {
 	}
 	CloseHandle(snapshot);
 	return output;
+}
+
+static PyObject* EBoxPY_Process_Allocate(PEBoxPY_Process self, PyObject* args) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.IsOpen_ was False.");
+		return NULL;
+	}
+	Py_ssize_t length = PyTuple_Size(args);
+	if (length < 1 || length > 3){
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Process.Allocate Takes 1-3 Arguments.");
+		return NULL;
+	}
+	PyObject* size = (PyTuple_GetItem(args, 0) == Py_None ? NULL : PyTuple_GetItem(args, 0));
+	PyObject* address = (length < 2 ? NULL : (PyTuple_GetItem(args, 1) == Py_None ? NULL : PyTuple_GetItem(args, 1)));
+	PyObject* range = (length < 3 ? NULL : (PyTuple_GetItem(args, 2) == Py_None ? NULL : PyTuple_GetItem(args, 2)));
+	if (!size || !PyLong_Check(size)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Process.Allocate Takes int as _Size.");
+		return NULL;
+	}
+	unsigned long long _size = PyLong_AsUnsignedLongLong(size);
+	long long _address = (!address ? 0 : PyLong_AsLongLong(address));
+	long long _range = (!range ? 0 : PyLong_AsLongLong(range));
+	if (!address && range) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Process.Allocate Invalid Arguments.");
+		return NULL;
+	}
+	else if (!address && !range) {
+		unsigned long long __address = (unsigned long long)VirtualAllocEx(self->Process_, NULL, _size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		if (!__address) {
+			PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.Allocate Failed to Allocate Memory.");
+			return NULL;
+		}
+		return PyLong_FromUnsignedLongLong(__address);
+	}
+	else if (address && !range) {
+		unsigned long long __address = (unsigned long long)VirtualAllocEx(self->Process_, (void*)_address, _size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+		if (!__address) {
+			PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.Allocate Failed to Allocate Memory.");
+			return NULL;
+		}
+		return PyLong_FromUnsignedLongLong(__address);
+	}
+	else {
+		SYSTEM_INFO information;
+		GetSystemInfo(&information);
+		long long start = _address - _range;
+		start &= information.dwAllocationGranularity;
+		if (start < (_address - _range))
+			start += information.dwAllocationGranularity;
+		long long end = _address + _range - _size;
+		end &= information.dwAllocationGranularity;
+		if (end > (_address + _range - _size))
+			end -= information.dwAllocationGranularity;
+		for (long long i = start; i < end; i += 0x1000) {
+			unsigned long long __address = (unsigned long long)VirtualAllocEx(self->Process_, (void*)i, _size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+			if (__address)
+				return PyLong_FromUnsignedLongLong(__address);
+		}
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.Allocate Failed to Allocate Memory.");
+		return NULL;
+	}
+}
+
+static PyObject* EBoxPY_Process_Free(PEBoxPY_Process self, PyObject* allocation) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.IsOpen_ was False.");
+		return NULL;
+	}
+	if (!PyLong_Check(allocation)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Process.Free requires int as _Allocation.");
+		return NULL;
+	}
+	unsigned long long address = PyLong_AsUnsignedLongLong(allocation);
+	if (!VirtualFreeEx(self->Process_, (void*)address, 0, MEM_RELEASE)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.Free Failed to Free Memory.");
+		return NULL;
+	}
+	Py_INCREF(Py_None);
+	return Py_None;
 }
 
 /*
