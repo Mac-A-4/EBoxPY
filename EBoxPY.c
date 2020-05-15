@@ -798,6 +798,382 @@ static PyObject* EBoxPY_Bytes_CopyFrom(PEBoxPY_Bytes self, PyObject* args) {
 
 /*
  *
+ * EBoxPY.Thread
+ *
+ */
+
+PyDoc_STRVAR(EBoxPY_Thread__doc__, "EBoxPY Thread object, defines a running Thread within a Process.");
+
+typedef struct EBoxPY_Thread_T {
+	//
+	PyObject_HEAD
+	//
+	HANDLE Thread_;
+	char IsOpen_;
+	unsigned long ID_;
+	//
+	char IsLocked_;
+	PyObject* Registers_;
+	//
+	CONTEXT Save_;
+	//
+} EBoxPY_Thread, *PEBoxPY_Thread;
+
+static void EBoxPY_Thread_dealloc(PyObject* self);
+static PyObject* EBoxPY_Thread_repr(PyObject* self);
+
+static PyObject* EBoxPY_Thread_Open(PEBoxPY_Thread self);
+static PyObject* EBoxPY_Thread_Close(PEBoxPY_Thread self);
+static PyObject* EBoxPY_Thread_Lock(PEBoxPY_Thread self);
+static PyObject* EBoxPY_Thread_Unlock(PEBoxPY_Thread self);
+
+static PyMemberDef EBoxPY_Thread_Members[] = {
+	{"Thread_", T_ULONGLONG, offsetof(EBoxPY_Thread, Thread_), READONLY, PyDoc_STR("The Handle to the Thread.")},
+	{"IsOpen_", T_BOOL, offsetof(EBoxPY_Thread, IsOpen_), READONLY, PyDoc_STR("True if the Thread is Open, False if not, defines validity of the Thread Handle.")},
+	{"ID_", T_ULONG, offsetof(EBoxPY_Thread, ID_), READONLY, PyDoc_STR("The ID of the Thread.")},
+	{"IsLocked_", T_BOOL, offsetof(EBoxPY_Thread, IsLocked_), READONLY, PyDoc_STR("True if the Thread is Locked, False if not, defines the validity of the Thread Registers.")},
+	{"Registers_", T_OBJECT, offsetof(EBoxPY_Thread, Registers_), READONLY, PyDoc_STR("The Registers of the Thread.")},
+	{NULL}
+};
+
+static PyMethodDef EBoxPY_Thread_Methods[] = {
+	{"Open", (PyCFunction)EBoxPY_Thread_Open, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Open()\nOpens the Thread if it is not already open.")},
+	{"Close", (PyCFunction)EBoxPY_Thread_Close, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Close()\nCloses the Thread, Closes the Handle.")},
+	{"Lock", (PyCFunction)EBoxPY_Thread_Lock, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Lock()\nLocks the Thread, sets the Registers.")},
+	{"Unlock", (PyCFunction)EBoxPY_Thread_Unlock, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Unlock()\nUnlocks the Thread.")},
+	{NULL}
+};
+
+static PyTypeObject EBoxPY_Thread_Type = {
+	PyObject_HEAD_INIT(NULL)
+	.tp_name = "EBoxPY.Thread",
+	.tp_basicsize = sizeof(EBoxPY_Thread),
+	.tp_doc = EBoxPY_Thread__doc__,
+	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+	.tp_members = EBoxPY_Thread_Members,
+	.tp_dealloc = EBoxPY_Thread_dealloc,
+	.tp_repr = EBoxPY_Thread_repr,
+	.tp_str = EBoxPY_Thread_repr,
+	.tp_methods = EBoxPY_Thread_Methods,
+};
+
+static int _EBoxPY_Initialize_Thread(PyObject* self) {
+	if (PyType_Ready(&EBoxPY_Thread_Type) < 0)
+		return 0;
+	PyModule_AddObject(self, "Thread", (PyObject*)&EBoxPY_Thread_Type);
+	return 1;
+}
+
+static PyObject* _EBoxPY_Create_Thread_ID(unsigned long _ID) {
+	PyObject* output = EBoxPY_Thread_Type.tp_alloc(&EBoxPY_Thread_Type, 1);
+	if (!output)
+		return NULL;
+	EBOXPY_OBJECT_ZERO(EBoxPY_Thread, output);
+	PEBoxPY_Thread thread = (PEBoxPY_Thread)output;
+	thread->ID_ = _ID;
+	thread->IsOpen_ = 0;
+	thread->IsLocked_ = 0;
+	thread->Thread_ = NULL;
+	thread->Registers_ = PyDict_New();
+	if (!thread->Registers_){
+		Py_DECREF(output);
+		return NULL;
+	}
+	return output;
+}
+
+static PyObject* _EBoxPY_Create_Thread_Handle(HANDLE _Handle) { // IMPORTANT: call CloseHandle() if returns NULL!! This steals a reference...
+	PyObject* output = EBoxPY_Thread_Type.tp_alloc(&EBoxPY_Thread_Type, 1);
+	if (!output)
+		return NULL;
+	EBOXPY_OBJECT_ZERO(EBoxPY_Thread, output);
+	PEBoxPY_Thread thread = (PEBoxPY_Thread)output;
+	thread->ID_ = GetThreadId(_Handle);
+	thread->IsOpen_ = 1;
+	thread->IsLocked_ = 0;
+	thread->Thread_ = _Handle;
+	thread->Registers_ = PyDict_New();
+	if (!thread->Registers_){
+		Py_DECREF(output);
+		return NULL;
+	}
+	return output;
+}
+
+static void EBoxPY_Thread_dealloc(PyObject* self) {
+	PEBoxPY_Thread thread = (PEBoxPY_Thread)self;
+	Py_XDECREF(thread->Registers_);
+	if (thread->IsLocked_)
+		ResumeThread(thread->Thread_);
+	if (thread->IsOpen_)
+		CloseHandle(thread->Thread_);
+	Py_TYPE(self)->tp_free(self);
+}
+
+static PyObject* EBoxPY_Thread_repr(PyObject* self) {
+	char output[64];
+	sprintf(output, "<EBoxPY.Thread: (0x%08x)>", ((PEBoxPY_Thread)self)->ID_);
+	return PyUnicode_FromString(output);
+}
+
+static PyObject* EBoxPY_Thread_Open(PEBoxPY_Thread self) {
+	if (self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsOpen_ was already True.");
+		return NULL;
+	}
+	self->Thread_ = OpenThread(THREAD_ALL_ACCESS, FALSE, (DWORD)self->ID_);
+	if (!self->Thread_ || self->Thread_ == INVALID_HANDLE_VALUE) {
+		self->Thread_ = NULL;
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread failed to open Thread, OpenThread failed.");
+		return NULL;
+	}
+	self->IsOpen_ = 1;
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+static PyObject* EBoxPY_Thread_Close(PEBoxPY_Thread self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsOpen_ was already False.");
+		return NULL;
+	}
+	if (self->IsLocked_) {
+		if (!EBoxPY_Thread_Unlock(self)) {
+			return NULL;
+		}
+	}
+	CloseHandle(self->Thread_);
+	self->Thread_ = NULL;
+	self->IsOpen_ = 0;
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+static int _EBoxPY_Thread_Add_Register(PyObject* _Registers, const char* _Name, void* _Location, unsigned long long _Size) {
+	if (!PyDict_Check(_Registers))
+		return 0;
+	PyObject* value = _EBoxPY_Create_Bytes(_Size);
+	if (!value)
+		return 0;
+	PEBoxPY_Bytes bytes = (PEBoxPY_Bytes)value;
+	memcpy(bytes->Allocation_, _Location, _Size);
+	PyObject* key = PyUnicode_FromString(_Name);
+	if (!key) {
+		Py_DECREF(value);
+		return 0;
+	}
+	if (PyDict_SetItem(_Registers, key, value) != 0) {
+		Py_DECREF(key);
+		Py_DECREF(value);
+		return 0;
+	}
+	Py_DECREF(key);
+	Py_DECREF(value);
+	return 1;
+}
+
+static int _EBoxPY_Thread_Get_Register(PyObject* _Registers, const char* _Name, void* _Location) {
+	if (!PyDict_Check(_Registers))
+		return 0;
+	PyObject* value = PyDict_GetItemString(_Registers, _Name);
+	if (!value)
+		return 0;
+	PEBoxPY_Bytes bytes = (PEBoxPY_Bytes)value;
+	memcpy(_Location, bytes->Allocation_, bytes->Size_);
+	return 1;
+}
+
+static int _EBoxPY_Thread_Add_Context(PyObject* _Registers, CONTEXT* _Context) {
+	PyDict_Clear(_Registers);
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rax", &_Context->Rax, sizeof(_Context->Rax))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rbx", &_Context->Rbx, sizeof(_Context->Rbx))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rcx", &_Context->Rcx, sizeof(_Context->Rcx))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rdx", &_Context->Rdx, sizeof(_Context->Rdx))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rsi", &_Context->Rsi, sizeof(_Context->Rsi))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rdi", &_Context->Rdi, sizeof(_Context->Rdi))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rsp", &_Context->Rsp, sizeof(_Context->Rsp))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rbp", &_Context->Rbp, sizeof(_Context->Rbp))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r8", &_Context->R8, sizeof(_Context->R8))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r9", &_Context->R9, sizeof(_Context->R9))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r10", &_Context->R10, sizeof(_Context->R10))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r11", &_Context->R11, sizeof(_Context->R11))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r12", &_Context->R12, sizeof(_Context->R12))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r13", &_Context->R13, sizeof(_Context->R13))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r14", &_Context->R14, sizeof(_Context->R14))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "r15", &_Context->R15, sizeof(_Context->R15))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "rip", &_Context->Rip, sizeof(_Context->Rip))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Add_Register(_Registers, "eflags", &_Context->EFlags, sizeof(_Context->EFlags))) {
+		PyDict_Clear(_Registers);
+		return 0;
+	}
+	return 1;
+}
+
+static int _EBoxPY_Thread_Get_Context(PyObject* _Registers, CONTEXT* _Context) {
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rax", &_Context->Rax)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rbx", &_Context->Rbx)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rcx", &_Context->Rcx)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rdx", &_Context->Rdx)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rsi", &_Context->Rsi)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rdi", &_Context->Rdi)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rsp", &_Context->Rsp)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rbp", &_Context->Rbp)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r8", &_Context->R8)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r9", &_Context->R9)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r10", &_Context->R10)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r11", &_Context->R11)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r12", &_Context->R12)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r13", &_Context->R13)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r14", &_Context->R14)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "r15", &_Context->R15)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "rip", &_Context->Rip)) {
+		return 0;
+	}
+	if (!_EBoxPY_Thread_Get_Register(_Registers, "eflags", &_Context->EFlags)) {
+		return 0;
+	}
+	return 1;
+}
+
+static PyObject* EBoxPY_Thread_Lock(PEBoxPY_Thread self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsOpen_ was False.");
+		return NULL;
+	}
+	if (self->IsLocked_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsLocked_ was already True.");
+		return NULL;
+	}
+	if (SuspendThread(self->Thread_) == (DWORD)-1){
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Suspend Thread.");
+		return NULL;
+	}
+	self->Save_.ContextFlags = CONTEXT_ALL;
+	if (!GetThreadContext(self->Thread_, &self->Save_)) {
+		ResumeThread(self->Thread_);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Read Thread Context.");
+		return NULL;
+	}
+	if (!_EBoxPY_Thread_Add_Context(self->Registers_, &self->Save_)) {
+		ResumeThread(self->Thread_);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Add Thread Context.");
+		return NULL;
+	}
+	self->IsLocked_ = 1;
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+static PyObject* EBoxPY_Thread_Unlock(PEBoxPY_Thread self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsOpen_ was False.");
+		return NULL;
+	}
+	if (!self->IsLocked_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsLocked_ was already False.");
+		return NULL;
+	}
+	self->Save_.ContextFlags = CONTEXT_ALL;
+	if (!_EBoxPY_Thread_Get_Context(self->Registers_, &self->Save_)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Get Context from Dictionary.");
+		return NULL;
+	}
+	PyDict_Clear(self->Registers_);
+	if (!SetThreadContext(self->Thread_, &self->Save_)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Set Thread Context.");
+		return NULL;
+	}
+	ResumeThread(self->Thread_);
+	self->IsLocked_ = 0;
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+/*
+ *
  * EBoxPY.Process
  *
  */
@@ -825,6 +1201,7 @@ static PyObject* EBoxPY_Process_GetModules(PEBoxPY_Process self);
 static PyObject* EBoxPY_Process_GetRegion(PEBoxPY_Process self, PyObject* address);
 static PyObject* EBoxPY_Process_ReadTo(PEBoxPY_Process self, PyObject* args);
 static PyObject* EBoxPY_Process_WriteFrom(PEBoxPY_Process self, PyObject* args);
+static PyObject* EBoxPY_Process_GetThreads(PEBoxPY_Process self);
 
 static PyMemberDef EBoxPY_Process_Members[] = {
 	{"Process_", T_ULONGLONG, offsetof(EBoxPY_Process, Process_), READONLY, PyDoc_STR("The Handle to the Process.")},
@@ -835,12 +1212,13 @@ static PyMemberDef EBoxPY_Process_Members[] = {
 };
 
 static PyMethodDef EBoxPY_Process_Methods[] = {
-	{"Open", (PyCFunction)EBoxPY_Process_Open, METH_NOARGS, PyDoc_STR("EBoxPY.Process.Open() -> bool\nOpens the Process if it is not already open.")},
+	{"Open", (PyCFunction)EBoxPY_Process_Open, METH_NOARGS, PyDoc_STR("EBoxPY.Process.Open()\nOpens the Process if it is not already open.")},
 	{"Close", (PyCFunction)EBoxPY_Process_Close, METH_NOARGS, PyDoc_STR("EBoxPY.Process.Close()\nCloses the Process, Closes the Handle.")},
 	{"GetModules", (PyCFunction)EBoxPY_Process_GetModules, METH_NOARGS, PyDoc_STR("EBoxPY.Process.GetModules() -> { \"*.dll\" : EBoxPY.Module(...), ... }\nRetrieves a dictionary of Modules currently loaded in the Process.")},
 	{"GetRegion", (PyCFunction)EBoxPY_Process_GetRegion, METH_O, PyDoc_STR("EBoxPY.Process.GetRegion(_Address) -> EBoxPY.Region\nGets the Region at the specified Address.")},
 	{"ReadTo", (PyCFunction)EBoxPY_Process_ReadTo, METH_VARARGS, PyDoc_STR("EBoxPY.Process.ReadTo(_Address, _Bytes, _Start, _Size)\nReads Bytes from Address into specified Bytes object.")},
 	{"WriteFrom", (PyCFunction)EBoxPY_Process_WriteFrom, METH_VARARGS, PyDoc_STR("EBoxPY.Process.WriteFrom(_Address, _Bytes, _Start, _Size)\nWrites Bytes to specified Address.")},
+	{"GetThreads", (PyCFunction)EBoxPY_Process_GetThreads, METH_NOARGS, PyDoc_STR("EBoxPY.Process.GetThreads() -> [ EBoxPY.Thread(...), ... ]\nRetrieves a list of Threads running in the Process.")},
 	{NULL}
 };
 
@@ -866,9 +1244,9 @@ static int _EBoxPY_Initialize_Process(PyObject* self) {
 
 static PyObject* _EBoxPY_Create_Process(PROCESSENTRY32W _Entry) {
 	PyObject* output = EBoxPY_Process_Type.tp_alloc(&EBoxPY_Process_Type, 1);
-	EBOXPY_OBJECT_ZERO(EBoxPY_Process, output);
 	if (!output)
 		return NULL;
+	EBOXPY_OBJECT_ZERO(EBoxPY_Process, output);
 	PEBoxPY_Process process = (PEBoxPY_Process)output;
 	process->Process_ = NULL;
 	process->IsOpen_ = (char)0;
@@ -876,6 +1254,76 @@ static PyObject* _EBoxPY_Create_Process(PROCESSENTRY32W _Entry) {
 	process->Name_ = PyUnicode_FromWideChar(_Entry.szExeFile, -1);
 	if (!process->Name_) {
 		Py_DECREF(output);
+		return NULL;
+	}
+	return output;
+}
+
+static PyObject* _EBoxPY_GetProcessNameFromID(unsigned long _ID) {
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (!snapshot || snapshot == INVALID_HANDLE_VALUE) {
+		return NULL;
+	}
+	PROCESSENTRY32W entry = {0};
+	entry.dwSize = sizeof(PROCESSENTRY32W);
+	for (BOOL b = Process32FirstW(snapshot, &entry); b == TRUE; b = Process32NextW(snapshot, &entry)) {
+		if (entry.th32ProcessID == _ID) {
+			CloseHandle(snapshot);
+			return PyUnicode_FromWideChar(entry.szExeFile, -1);
+		}
+	}
+	CloseHandle(snapshot);
+	return NULL;
+}
+
+static PyObject* EBoxPY_StartProcess(PyObject* self, PyObject* args) {
+	if (PyTuple_Size(args) != 2) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.StartProcess Takes 2 Arguments.");
+		return NULL;
+	}
+	PyObject* _Executable = PyTuple_GetItem(args, 0);
+	PyObject* _Suspended = PyTuple_GetItem(args, 1);
+	if (!PyUnicode_Check(_Executable)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.StartProcess Requires _Executable to be str.");
+		return NULL;
+	}
+	if (!PyBool_Check(_Suspended)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.StartProcess Requires _Suspended to be bool.");
+		return NULL;
+	}
+	int suspended = PyObject_IsTrue(_Suspended);
+	Py_ssize_t length = 0;
+	wchar_t* executable = PyUnicode_AsWideCharString(_Executable, &length);
+	if (!executable) {
+		return NULL;
+	}
+	STARTUPINFOW startup = {0};
+	startup.cb = sizeof(STARTUPINFOW);
+	PROCESS_INFORMATION information = {0};
+	if (!CreateProcessW(NULL, executable, NULL, NULL, FALSE, (suspended ? CREATE_SUSPENDED : 0), NULL, NULL, &startup, &information)) {
+		PyMem_Free(executable);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Start Process.");
+		return NULL;
+	}
+	PyMem_Free(executable);
+	PyObject* output = EBoxPY_Process_Type.tp_alloc(&EBoxPY_Process_Type, 1);
+	if (!output) {
+		CloseHandle(information.hProcess);
+		CloseHandle(information.hThread);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Allocate EBoxPY.Process.");
+		return NULL;
+	}
+	EBOXPY_OBJECT_ZERO(EBoxPY_Process, output);
+	PEBoxPY_Process process = (PEBoxPY_Process)output;
+	process->ID_ = (unsigned long)information.dwProcessId;
+	process->IsOpen_ = 1;
+	process->Process_ = information.hProcess;
+	process->Name_ = _EBoxPY_GetProcessNameFromID(process->ID_);
+	if (!process->Name_) {
+		CloseHandle(information.hProcess);
+		CloseHandle(information.hThread);
+		Py_DECREF(output);
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Get Process Name from ID.");
 		return NULL;
 	}
 	return output;
@@ -1115,6 +1563,36 @@ static PyObject* EBoxPY_Process_WriteFrom(PEBoxPY_Process self, PyObject* args) 
 	return Py_None;
 }
 
+static PyObject* EBoxPY_Process_GetThreads(PEBoxPY_Process self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.IsOpen_ was False.");
+		return NULL;
+	}
+	PyObject* output = PyList_New(0);
+	if (!output) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.GetThreads Failed to Create output list.");
+		return NULL;
+	}
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	if (!snapshot || snapshot == INVALID_HANDLE_VALUE){
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.GetThreads Failed to Create Snapshot.");
+		return NULL;
+	}
+	THREADENTRY32 entry = {0};
+	entry.dwSize = sizeof(THREADENTRY32);
+	for (BOOL b = Thread32First(snapshot, &entry); b == TRUE; b = Thread32Next(snapshot, &entry)) {
+		if (entry.th32OwnerProcessID == self->ID_) {
+			PyObject* thread = _EBoxPY_Create_Thread_ID(entry.th32ThreadID);
+			if (!thread)
+				continue;
+			PyList_Append(output, thread);
+			Py_DECREF(thread);
+		}
+	}
+	CloseHandle(snapshot);
+	return output;
+}
+
 /*
  *
  * Global
@@ -1179,6 +1657,7 @@ static PyObject* EBoxPY_GetProcessesByName(PyObject* self, PyObject* key) {
 static PyMethodDef EBoxPY_Global_Methods[] = {
 	{"GetProcesses", (PyCFunction)EBoxPY_GetProcesses, METH_NOARGS, PyDoc_STR("EBoxPY.GetProcesses() -> [EBoxPY.Process(...), ...]\nRetrieves a list of Processes, the Processes are not yet Opened.")},
 	{"GetProcessesByName", (PyCFunction)EBoxPY_GetProcessesByName, METH_O, PyDoc_STR("EBoxPY.GetProcessesByName(_Name) -> [EBoxPY.Process(...), ...]\nRetrieves a list of Processes with EBoxPY.Process.Name_ == _Name, the Processes are not yet Opened.")},
+	{"StartProcess", (PyCFunction)EBoxPY_StartProcess, METH_VARARGS, PyDoc_STR("EBoxPY.StartProcess(_Executable, _Suspended) -> EBoxPY.Process\nLaunches a new Process.")},
 	{NULL}
 };
 
@@ -1201,6 +1680,7 @@ PyMODINIT_FUNC PyInit_EBoxPY(void) {
 	_EBoxPY_Initialize_Region(_module);
 	_EBoxPY_Initialize_Module(_module);
 	_EBoxPY_Initialize_Bytes(_module);
+	_EBoxPY_Initialize_Thread(_module);
 	_EBoxPY_Initialize_Process(_module);
 	return _module;
 }
