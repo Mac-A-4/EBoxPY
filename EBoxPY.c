@@ -1318,12 +1318,14 @@ static PyObject* EBoxPY_StartProcess(PyObject* self, PyObject* args) {
 		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.StartProcess Failed to Create Thread.");
 		return NULL;
 	}
-	if (!EBoxPY_Thread_Lock((PEBoxPY_Thread)thread)) {
-		CloseHandle(information.hProcess);
-		Py_DECREF(thread);
-		return NULL;
+	if (suspended) {
+		if (!EBoxPY_Thread_Lock((PEBoxPY_Thread)thread)) {
+			CloseHandle(information.hProcess);
+			Py_DECREF(thread);
+			return NULL;
+		}
+		ResumeThread(information.hThread); // Because EBoxPY_Thread_Lock suspends!
 	}
-	ResumeThread(information.hThread); // Because EBoxPY_Thread_Lock suspends!
 	PyObject* output = EBoxPY_Process_Type.tp_alloc(&EBoxPY_Process_Type, 1);
 	if (!output) {
 		CloseHandle(information.hProcess);
