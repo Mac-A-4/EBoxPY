@@ -1697,6 +1697,32 @@ static PyObject* EBoxPY_Process_Free(PEBoxPY_Process self, PyObject* allocation)
  *
  */
 
+static PyObject* EBoxPY_GetCurrentProcess(PyObject* self) {
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (!snapshot || snapshot == INVALID_HANDLE_VALUE) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.GetCurrentProcess failed to Create Toolhelp32 Snapshot, CreateToolhelp32Snapshot failed.");
+		return NULL;
+	}
+	PROCESSENTRY32W entry = {0};
+	entry.dwSize = sizeof(PROCESSENTRY32W);
+	for (BOOL b = Process32FirstW(snapshot, &entry); b == TRUE; b = Process32NextW(snapshot, &entry)) {
+		if (entry.th32ProcessID == GetCurrentProcessId()) {
+			PyObject* process = _EBoxPY_Create_Process(entry);
+			CloseHandle(snapshot);
+			if (!process) {
+				PyErr_SetString(PyExc_RuntimeError, "EBoxPY.GetCurrentProcess failed to Create Current Process.");
+				return NULL;
+			}
+			else {
+				return process;
+			}
+		}
+	}
+	CloseHandle(snapshot);
+	PyErr_SetString(PyExc_RuntimeError, "EBoxPY.GetCurrentProcess failed to Locate Current Process.");
+	return NULL;
+}
+
 static PyObject* EBoxPY_GetProcesses(PyObject* self) {
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (!snapshot || snapshot == INVALID_HANDLE_VALUE) {
@@ -1753,6 +1779,7 @@ static PyObject* EBoxPY_GetProcessesByName(PyObject* self, PyObject* key) {
 }
 
 static PyMethodDef EBoxPY_Global_Methods[] = {
+	{"GetCurrentProcess", (PyCFunction)EBoxPY_GetCurrentProcess, METH_NOARGS, PyDoc_STR("EBoxPY.GetCurrentProcess() -> EBoxPY.Process(...)\n.")},
 	{"GetProcesses", (PyCFunction)EBoxPY_GetProcesses, METH_NOARGS, PyDoc_STR("EBoxPY.GetProcesses() -> [EBoxPY.Process(...), ...]\nRetrieves a list of Processes, the Processes are not yet Opened.")},
 	{"GetProcessesByName", (PyCFunction)EBoxPY_GetProcessesByName, METH_O, PyDoc_STR("EBoxPY.GetProcessesByName(_Name) -> [EBoxPY.Process(...), ...]\nRetrieves a list of Processes with EBoxPY.Process.Name_ == _Name, the Processes are not yet Opened.")},
 	{"StartProcess", (PyCFunction)EBoxPY_StartProcess, METH_VARARGS, PyDoc_STR("EBoxPY.StartProcess(_Executable, _Suspended) -> EBoxPY.Process\nLaunches a new Process.")},
