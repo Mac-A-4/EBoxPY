@@ -951,171 +951,102 @@ static PyObject* EBoxPY_Thread_Close(PEBoxPY_Thread self) {
 	return Py_None;
 }
 
-static int _EBoxPY_Thread_Add_Register(PyObject* _Registers, const char* _Name, void* _Location, unsigned long long _Size) {
+typedef struct _EBoxPY_Thread_Register_T {
+	const char* Public_;
+	unsigned long long Private_;
+	unsigned long long Size_;
+} _EBoxPY_Thread_Register, *_PEBoxPY_Thread_Register;
+
+#define EBOXPY_THREAD_CREATE_REGISTER(_Public, _Private) { #_Public, (unsigned long long)offsetof(CONTEXT, _Private), sizeof(((CONTEXT*)0)->_Private) }
+
+static _EBoxPY_Thread_Register _EBoxPY_Thread_Register_List[] = {
+	EBOXPY_THREAD_CREATE_REGISTER(RAX, Rax),
+	EBOXPY_THREAD_CREATE_REGISTER(RBX, Rbx),
+	EBOXPY_THREAD_CREATE_REGISTER(RCX, Rcx),
+	EBOXPY_THREAD_CREATE_REGISTER(RDX, Rdx),
+	EBOXPY_THREAD_CREATE_REGISTER(RSI, Rsi),
+	EBOXPY_THREAD_CREATE_REGISTER(RDI, Rdi),
+	EBOXPY_THREAD_CREATE_REGISTER(RSP, Rsp),
+	EBOXPY_THREAD_CREATE_REGISTER(RBP, Rbp),
+	EBOXPY_THREAD_CREATE_REGISTER(R8, R8),
+	EBOXPY_THREAD_CREATE_REGISTER(R9, R8),
+	EBOXPY_THREAD_CREATE_REGISTER(R10, R10),
+	EBOXPY_THREAD_CREATE_REGISTER(R11, R11),
+	EBOXPY_THREAD_CREATE_REGISTER(R12, R12),
+	EBOXPY_THREAD_CREATE_REGISTER(R13, R13),
+	EBOXPY_THREAD_CREATE_REGISTER(R14, R14),
+	EBOXPY_THREAD_CREATE_REGISTER(R15, R15),
+	EBOXPY_THREAD_CREATE_REGISTER(RIP, Rip),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM0, Xmm0),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM1, Xmm1),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM2, Xmm2),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM3, Xmm3),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM4, Xmm4),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM5, Xmm5),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM6, Xmm6),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM7, Xmm7),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM8, Xmm8),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM9, Xmm9),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM10, Xmm10),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM11, Xmm11),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM12, Xmm12),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM13, Xmm13),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM14, Xmm14),
+	EBOXPY_THREAD_CREATE_REGISTER(XMM15, Xmm15),
+	EBOXPY_THREAD_CREATE_REGISTER(DR0, Dr0),
+	EBOXPY_THREAD_CREATE_REGISTER(DR1, Dr1),
+	EBOXPY_THREAD_CREATE_REGISTER(DR2, Dr2),
+	EBOXPY_THREAD_CREATE_REGISTER(DR3, Dr3),
+	EBOXPY_THREAD_CREATE_REGISTER(DR6, Dr6),
+	EBOXPY_THREAD_CREATE_REGISTER(DR7, Dr7),
+	{NULL}
+};
+
+static int _EBoxPY_Thread_Add_Register(PyObject* _Registers, _PEBoxPY_Thread_Register _Register, CONTEXT* _Context) {
 	if (!PyDict_Check(_Registers))
 		return 0;
-	PyObject* value = _EBoxPY_Create_Bytes(_Size);
+	PyObject* value = _EBoxPY_Create_Bytes(_Register->Size_);
 	if (!value)
 		return 0;
 	PEBoxPY_Bytes bytes = (PEBoxPY_Bytes)value;
-	memcpy(bytes->Allocation_, _Location, _Size);
-	PyObject* key = PyUnicode_FromString(_Name);
-	if (!key) {
+	memcpy(bytes->Allocation_, ((char*)_Context) + _Register->Private_, _Register->Size_);
+	if (PyDict_SetItemString(_Registers, _Register->Public_, value) != 0) {
 		Py_DECREF(value);
 		return 0;
 	}
-	if (PyDict_SetItem(_Registers, key, value) != 0) {
-		Py_DECREF(key);
-		Py_DECREF(value);
-		return 0;
-	}
-	Py_DECREF(key);
 	Py_DECREF(value);
 	return 1;
 }
 
-static int _EBoxPY_Thread_Get_Register(PyObject* _Registers, const char* _Name, void* _Location) {
+static int _EBoxPY_Thread_Get_Register(PyObject* _Registers, _PEBoxPY_Thread_Register _Register, CONTEXT* _Context) {
 	if (!PyDict_Check(_Registers))
 		return 0;
-	PyObject* value = PyDict_GetItemString(_Registers, _Name);
+	PyObject* value = PyDict_GetItemString(_Registers, _Register->Public_);
 	if (!value)
 		return 0;
 	PEBoxPY_Bytes bytes = (PEBoxPY_Bytes)value;
-	memcpy(_Location, bytes->Allocation_, bytes->Size_);
+	if (bytes->Size_ != _Register->Size_)
+		return 0;
+	memcpy(((char*)_Context) + _Register->Private_, bytes->Allocation_, _Register->Size_);
 	return 1;
 }
 
 static int _EBoxPY_Thread_Add_Context(PyObject* _Registers, CONTEXT* _Context) {
 	PyDict_Clear(_Registers);
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rax", &_Context->Rax, sizeof(_Context->Rax))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rbx", &_Context->Rbx, sizeof(_Context->Rbx))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rcx", &_Context->Rcx, sizeof(_Context->Rcx))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rdx", &_Context->Rdx, sizeof(_Context->Rdx))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rsi", &_Context->Rsi, sizeof(_Context->Rsi))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rdi", &_Context->Rdi, sizeof(_Context->Rdi))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rsp", &_Context->Rsp, sizeof(_Context->Rsp))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rbp", &_Context->Rbp, sizeof(_Context->Rbp))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r8", &_Context->R8, sizeof(_Context->R8))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r9", &_Context->R9, sizeof(_Context->R9))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r10", &_Context->R10, sizeof(_Context->R10))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r11", &_Context->R11, sizeof(_Context->R11))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r12", &_Context->R12, sizeof(_Context->R12))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r13", &_Context->R13, sizeof(_Context->R13))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r14", &_Context->R14, sizeof(_Context->R14))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "r15", &_Context->R15, sizeof(_Context->R15))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "rip", &_Context->Rip, sizeof(_Context->Rip))) {
-		PyDict_Clear(_Registers);
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Add_Register(_Registers, "eflags", &_Context->EFlags, sizeof(_Context->EFlags))) {
-		PyDict_Clear(_Registers);
-		return 0;
+	for (_PEBoxPY_Thread_Register i = _EBoxPY_Thread_Register_List; i->Public_ != NULL; ++i) {
+		if (!_EBoxPY_Thread_Add_Register(_Registers, i, _Context)) {
+			PyDict_Clear(_Registers);
+			return 0;
+		}
 	}
 	return 1;
 }
 
 static int _EBoxPY_Thread_Get_Context(PyObject* _Registers, CONTEXT* _Context) {
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rax", &_Context->Rax)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rbx", &_Context->Rbx)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rcx", &_Context->Rcx)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rdx", &_Context->Rdx)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rsi", &_Context->Rsi)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rdi", &_Context->Rdi)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rsp", &_Context->Rsp)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rbp", &_Context->Rbp)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r8", &_Context->R8)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r9", &_Context->R9)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r10", &_Context->R10)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r11", &_Context->R11)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r12", &_Context->R12)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r13", &_Context->R13)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r14", &_Context->R14)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "r15", &_Context->R15)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "rip", &_Context->Rip)) {
-		return 0;
-	}
-	if (!_EBoxPY_Thread_Get_Register(_Registers, "eflags", &_Context->EFlags)) {
-		return 0;
+	for (_PEBoxPY_Thread_Register i = _EBoxPY_Thread_Register_List; i->Public_ != NULL; ++i) {
+		if (!_EBoxPY_Thread_Get_Register(_Registers, i, _Context)) {
+			return 0;
+		}
 	}
 	return 1;
 }
