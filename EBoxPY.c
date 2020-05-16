@@ -802,6 +802,10 @@ static PyObject* EBoxPY_Bytes_CopyFrom(PEBoxPY_Bytes self, PyObject* args) {
  *
  */
 
+#define EBOXPY_BREAK_EXECUTE 0b00
+#define EBOXPY_BREAK_WRITE 0b01
+#define EBOXPY_BREAK_ACCESS 0b11
+
 PyDoc_STRVAR(EBoxPY_Thread__doc__, "EBoxPY Thread object, defines a running Thread within a Process.");
 
 typedef struct EBoxPY_Thread_T {
@@ -826,6 +830,8 @@ static PyObject* EBoxPY_Thread_Open(PEBoxPY_Thread self);
 static PyObject* EBoxPY_Thread_Close(PEBoxPY_Thread self);
 static PyObject* EBoxPY_Thread_Lock(PEBoxPY_Thread self);
 static PyObject* EBoxPY_Thread_Unlock(PEBoxPY_Thread self);
+static PyObject* EBoxPY_Thread_SetBreakpoint(PEBoxPY_Thread self, PyObject* args);
+static PyObject* EBoxPY_Thread_RemoveBreakpoint(PEBoxPY_Thread self, PyObject* index);
 
 static PyMemberDef EBoxPY_Thread_Members[] = {
 	{"Thread_", T_ULONGLONG, offsetof(EBoxPY_Thread, Thread_), READONLY, PyDoc_STR("The Handle to the Thread.")},
@@ -841,6 +847,8 @@ static PyMethodDef EBoxPY_Thread_Methods[] = {
 	{"Close", (PyCFunction)EBoxPY_Thread_Close, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Close()\nCloses the Thread, Closes the Handle.")},
 	{"Lock", (PyCFunction)EBoxPY_Thread_Lock, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Lock()\nLocks the Thread, sets the Registers.")},
 	{"Unlock", (PyCFunction)EBoxPY_Thread_Unlock, METH_NOARGS, PyDoc_STR("EBoxPY.Thread.Unlock()\nUnlocks the Thread.")},
+	{"SetBreakpoint", (PyCFunction)EBoxPY_Thread_SetBreakpoint, METH_VARARGS, PyDoc_STR("EBoxPY.Thread.SetBreakpoint(_Index, _Address, _Condition)\nInserts a Hardware Breakpoint at the given Index in the Context.")},
+	{"RemoveBreakpoint", (PyCFunction)EBoxPY_Thread_RemoveBreakpoint, METH_O, PyDoc_STR("EBoxPY.Thread.RemoveBreakpoint(_Index)\nRemoves the Hardware Breakpoint at the given Index in the Context.")},
 	{NULL}
 };
 
@@ -858,6 +866,9 @@ static PyTypeObject EBoxPY_Thread_Type = {
 };
 
 static int _EBoxPY_Initialize_Thread(PyObject* self) {
+	PyModule_AddIntConstant(self, "EXECUTE", EBOXPY_BREAK_EXECUTE);
+	PyModule_AddIntConstant(self, "WRITE", EBOXPY_BREAK_WRITE);
+	PyModule_AddIntConstant(self, "ACCESS", EBOXPY_BREAK_ACCESS);
 	if (PyType_Ready(&EBoxPY_Thread_Type) < 0)
 		return 0;
 	PyModule_AddObject(self, "Thread", (PyObject*)&EBoxPY_Thread_Type);
@@ -1002,6 +1013,15 @@ static _EBoxPY_Thread_Register _EBoxPY_Thread_Register_List[] = {
 	{NULL}
 };
 
+static int _EBoxPY_Thread_Get_Register_Bytes(PyObject* _Registers, const char* _Name, PEBoxPY_Bytes* _Bytes) {
+	if (!PyDict_Check(_Registers))
+		return 0;
+	*_Bytes = (PEBoxPY_Bytes)PyDict_GetItemString(_Registers, _Name);
+	if (!(*_Bytes))
+		return 0;
+	return PyObject_IsInstance((PyObject*)(*_Bytes), (PyObject*)&EBoxPY_Bytes_Type);
+}
+
 static int _EBoxPY_Thread_Add_Register(PyObject* _Registers, _PEBoxPY_Thread_Register _Register, CONTEXT* _Context) {
 	if (!PyDict_Check(_Registers))
 		return 0;
@@ -1019,12 +1039,9 @@ static int _EBoxPY_Thread_Add_Register(PyObject* _Registers, _PEBoxPY_Thread_Reg
 }
 
 static int _EBoxPY_Thread_Get_Register(PyObject* _Registers, _PEBoxPY_Thread_Register _Register, CONTEXT* _Context) {
-	if (!PyDict_Check(_Registers))
+	PEBoxPY_Bytes bytes = NULL;
+	if (!_EBoxPY_Thread_Get_Register_Bytes(_Registers, _Register->Public_, &bytes))
 		return 0;
-	PyObject* value = PyDict_GetItemString(_Registers, _Register->Public_);
-	if (!value)
-		return 0;
-	PEBoxPY_Bytes bytes = (PEBoxPY_Bytes)value;
 	if (bytes->Size_ != _Register->Size_)
 		return 0;
 	memcpy(((char*)_Context) + _Register->Private_, bytes->Allocation_, _Register->Size_);
@@ -1101,6 +1118,87 @@ static PyObject* EBoxPY_Thread_Unlock(PEBoxPY_Thread self) {
 	}
 	ResumeThread(self->Thread_);
 	self->IsLocked_ = 0;
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+#define EBOXPY_BREAKPOINT(_Index, _Condition) ((1 << (2 * _Index)) | (_Condition << (16 + (4 * _Index))))
+#define EBOXPY_BREAKPOINT_MASK(_Index) EBOXPY_BREAKPOINT(_Index, 0b11)
+
+static PyObject* EBoxPY_Thread_SetBreakpoint(PEBoxPY_Thread self, PyObject* args) {
+	if (!self->IsLocked_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsLocked_ was False.");
+		return NULL;
+	}
+	int index = 0;
+	PyObject* address = NULL;
+	int conditions = 0;
+	if (!PyArg_ParseTuple(args, "iOi", &index, &address, &conditions))
+		return NULL;
+	if (!PyLong_Check(address)){
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Thread Requires _Address to be int.");
+		return NULL;
+	}
+	unsigned long long _address = PyLong_AsUnsignedLongLong(address);
+	if (index < 0 || index > 3) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Requires _Index >= 0 && _Index <= 3.");
+		return NULL;
+	}
+	if (conditions != EBOXPY_BREAK_ACCESS && conditions != EBOXPY_BREAK_EXECUTE && conditions != EBOXPY_BREAK_WRITE) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Requires _Conditions to be EBoxPY.ACCESS, EXECUTE, WRITE");
+		return NULL;
+	}
+	char DRX[8] = {0};
+	sprintf(DRX, "DR%i", index);
+	PEBoxPY_Bytes _DRX = NULL;
+	PEBoxPY_Bytes _DR7 = NULL;
+	if (!_EBoxPY_Thread_Get_Register_Bytes(self->Registers_, DRX, &_DRX) || !_EBoxPY_Thread_Get_Register_Bytes(self->Registers_, "DR7", &_DR7)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Locate DRX, DR7.");
+		return 0;
+	}
+	if (_DRX->Size_ != 8 || _DR7->Size_ != 8) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread DRX or DR7 had Size_ != 8.");
+		return 0;
+	}
+	unsigned long long* __DRX = (unsigned long long*)_DRX->Allocation_;
+	unsigned long long* __DR7 = (unsigned long long*)_DR7->Allocation_;
+	*__DRX = _address;
+	*__DR7 &= ~EBOXPY_BREAKPOINT_MASK(index);
+	*__DR7 |= EBOXPY_BREAKPOINT(index, conditions);
+	Py_INCREF(Py_None);
+	return Py_None;
+}
+
+static PyObject* EBoxPY_Thread_RemoveBreakpoint(PEBoxPY_Thread self, PyObject* index) {
+	if (!self->IsLocked_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread.IsLocked_ was False.");
+		return NULL;
+	}
+	if (!PyLong_Check(index)) {
+		PyErr_SetString(PyExc_TypeError, "EBoxPY.Thread Requires _Index to be int.");
+		return NULL;
+	}
+	int _index = (int)PyLong_AsLong(index);
+	if (_index < 0 || _index > 3) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Requires _Index >= 0 && _Index <= 3.");
+		return NULL;
+	}
+	char DRX[8] = {0};
+	sprintf(DRX, "DR%i", _index);
+	PEBoxPY_Bytes _DRX = NULL;
+	PEBoxPY_Bytes _DR7 = NULL;
+	if (!_EBoxPY_Thread_Get_Register_Bytes(self->Registers_, DRX, &_DRX) || !_EBoxPY_Thread_Get_Register_Bytes(self->Registers_, "DR7", &_DR7)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread Failed to Locate DRX, DR7.");
+		return 0;
+	}
+	if (_DRX->Size_ != 8 || _DR7->Size_ != 8) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Thread DRX or DR7 had Size_ != 8.");
+		return 0;
+	}
+	unsigned long long* __DRX = (unsigned long long*)_DRX->Allocation_;
+	unsigned long long* __DR7 = (unsigned long long*)_DR7->Allocation_;
+	*__DRX = 0;
+	*__DR7 &= ~EBOXPY_BREAKPOINT_MASK(_index);
 	Py_INCREF(Py_None);
 	return Py_None;
 }
