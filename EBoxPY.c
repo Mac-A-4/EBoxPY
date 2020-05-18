@@ -1235,6 +1235,8 @@ static PyObject* EBoxPY_Process_WriteFrom(PEBoxPY_Process self, PyObject* args);
 static PyObject* EBoxPY_Process_GetThreads(PEBoxPY_Process self);
 static PyObject* EBoxPY_Process_Allocate(PEBoxPY_Process self, PyObject* args);
 static PyObject* EBoxPY_Process_Free(PEBoxPY_Process self, PyObject* allocation);
+static PyObject* EBoxPY_Process_IsI386(PEBoxPY_Process self);
+static PyObject* EBoxPY_Process_IsAMD64(PEBoxPY_Process self);
 
 static PyMemberDef EBoxPY_Process_Members[] = {
 	{"Process_", T_ULONGLONG, offsetof(EBoxPY_Process, Process_), READONLY, PyDoc_STR("The Handle to the Process.")},
@@ -1254,6 +1256,8 @@ static PyMethodDef EBoxPY_Process_Methods[] = {
 	{"GetThreads", (PyCFunction)EBoxPY_Process_GetThreads, METH_NOARGS, PyDoc_STR("EBoxPY.Process.GetThreads() -> [ EBoxPY.Thread(...), ... ]\nRetrieves a list of Threads running in the Process.")},
 	{"Allocate", (PyCFunction)EBoxPY_Process_Allocate, METH_VARARGS, PyDoc_STR("EBoxPY.Process.Allocate(_Size, _Address=None, _Range=None) -> int\nAllocates Memory in the Process with a given Size + Location options.")},
 	{"Free", (PyCFunction)EBoxPY_Process_Free, METH_O, PyDoc_STR("EBoxPY.Process.Free(_Allocation)\nFrees Memory in a Process.")},
+	{"IsI386", (PyCFunction)EBoxPY_Process_IsI386, METH_NOARGS, PyDoc_STR("EBoxPY.Process.IsI386() -> bool\nTrue if the Process is 32 bit, False otherwise.")},
+	{"IsAMD64", (PyCFunction)EBoxPY_Process_IsAMD64, METH_NOARGS, PyDoc_STR("EBoxPY.Process.IsAMD64() -> bool\nTrue if the Process is 64 bit, False otherwise.")},
 	{NULL}
 };
 
@@ -1718,6 +1722,46 @@ static PyObject* EBoxPY_Process_Free(PEBoxPY_Process self, PyObject* allocation)
 	}
 	Py_INCREF(Py_None);
 	return Py_None;
+}
+
+static PyObject* EBoxPY_Process_IsI386(PEBoxPY_Process self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.IsOpen_ was False.");
+		return NULL;
+	}
+	BOOL status = FALSE;
+	if (!IsWow64Process(self->Process_, &status)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process Failed to determine if Process is Wow64.");
+		return NULL;
+	}
+	if (status) {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
+	else {
+		Py_INCREF(Py_False);
+		return Py_False;
+	}
+}
+
+static PyObject* EBoxPY_Process_IsAMD64(PEBoxPY_Process self) {
+	if (!self->IsOpen_) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process.IsOpen_ was False.");
+		return NULL;
+	}
+	BOOL status = FALSE;
+	if (!IsWow64Process(self->Process_, &status)) {
+		PyErr_SetString(PyExc_RuntimeError, "EBoxPY.Process Failed to determine if Process is Wow64.");
+		return NULL;
+	}
+	if (status) {
+		Py_INCREF(Py_False);
+		return Py_False;
+	}
+	else {
+		Py_INCREF(Py_True);
+		return Py_True;
+	}
 }
 
 /*
